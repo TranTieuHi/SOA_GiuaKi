@@ -2,75 +2,98 @@ import pymysql
 from pymysql.cursors import DictCursor
 from dotenv import load_dotenv
 import os
+from contextlib import contextmanager
 
 load_dotenv()
 
+DB_CONFIG = {
+    'host': os.getenv("DB_HOST", "localhost"),
+    'user': os.getenv("DB_USER", "root"),
+    'password': os.getenv("DB_PASSWORD", ""),
+    'database': os.getenv("DB_NAME", "midterm_soa"),
+    'port': int(os.getenv("DB_PORT", 3306)),
+    'cursorclass': DictCursor,
+    'autocommit': False,
+    'charset': 'utf8mb4',
+}
+
+print(f"🔧 Database config:")
+print(f"   Host: {DB_CONFIG['host']}")
+print(f"   Database: {DB_CONFIG['database']}")
+print(f"   Port: {DB_CONFIG['port']}")
+
 class Database:
+    _instance = None
+    _connection_pool = []
+    _max_pool_size = 10
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Database, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self):
-        self.host = os.getenv("DB_HOST", "localhost")
-        self.user = os.getenv("DB_USER", "root")
-        self.password = os.getenv("DB_PASSWORD", "")
-        self.database = os.getenv("DB_NAME", "midterm_soa")
-        self.port = int(os.getenv("DB_PORT", 3306))
-        self.connection = None
-
-    def connect(self):
-        """Tạo kết nối đến database"""
+        if self._initialized:
+            return
+        self._initialized = True
+        print("✅ Database manager initialized")
+    
+    def _create_connection(self):
         try:
-            self.connection = pymysql.connect(
-                host=self.host,
-                user=self.user,
-                password=self.password,
-                database=self.database,
-                port=self.port,
-                cursorclass=DictCursor,
-                autocommit=True,
-                connect_timeout=5,
-                read_timeout=10,
-                write_timeout=10,
-                charset='utf8mb4'
-            )
-            print(f"✅ Database connected: {self.database}@{self.host}:{self.port}")
-            return self.connection
+            connection = pymysql.connect(**DB_CONFIG)
+            print(f"🔗 New database connection created")
+            return connection
         except Exception as e:
-            print(f"❌ Database connection failed: {e}")
+            print(f"❌ Failed to create connection: {e}")
             raise
-
+    
     def get_connection(self):
-        """Lấy kết nối hiện tại hoặc tạo mới"""
-        try:
-            if self.connection is None or not self.connection.open:
-                self.connect()
-            else:
-                # Test connection
-                self.connection.ping(reconnect=True)
-            
-            return self.connection
-        except Exception as e:
-            print(f"❌ Failed to get database connection: {e}")
+        while self._connection_pool:
+            connection = self._connection_pool.pop()
             try:
-                self.connect()
-                return self.connection
-            except Exception as reconnect_error:
-                print(f"❌ Reconnect failed: {reconnect_error}")
-                raise
-
-    def close(self):
-        """Đóng kết nối"""
+                connection.ping(reconnect=False)
+                return connection
+            except:
+                try:
+                    connection.close()
+                except:
+                    pass
+        return self._create_connection()
+    
+    def return_connection(self, connection):
+        if connection is None:
+            return
         try:
-            if self.connection and self.connection.open:
-                self.connection.close()
-                print("🔒 Database connection closed")
+            connection.ping(reconnect=False)
+            if len(self._connection_pool) < self._max_pool_size:
+                self._connection_pool.append(connection)
+            else:
+                connection.close()
+        except:
+            try:
+                connection.close()
+            except:
+                pass
+    
+    @contextmanager
+    def get_db_session(self):
+        connection = None
+        try:
+            connection = self.get_connection()
+            yield connection
         except Exception as e:
-            print(f"⚠️ Error closing database: {e}")
+            if connection:
+                try:
+                    connection.rollback()
+                except:
+                    pass
+            raise
+        finally:
+            if connection:
+                self.return_connection(connection)
 
-# Singleton instance
 db = Database()
 
 def get_db_connection():
-    """
-    Helper function to get database connection
-    ⚠️ Note: Don't close this connection manually in controllers
-    It's managed by the db singleton instance
-    """
     return db.get_connection()

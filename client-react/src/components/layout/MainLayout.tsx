@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button'; // ✅ Add this import
 import { LogOut, User, Home, CreditCard, History } from 'lucide-react';
-import { getCurrentUser, logout } from '../../features/authentication/authService';
+import { getCurrentUser, logout } from '../../features/authentication/services/authService';
 
 interface MainLayoutProps {
   children: ReactNode;

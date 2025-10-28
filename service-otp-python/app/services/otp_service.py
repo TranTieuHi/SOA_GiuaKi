@@ -23,12 +23,39 @@ _otp_storage: Dict[str, str] = {}
 _used_otp_tokens: Dict[str, set] = {}
 
 class OTPService:
+    def get_user_secret(self, user_id: str) -> str:
+        """
+        Tạo secret key CỐ ĐỊNH từ user_id.
+        Cùng user_id → cùng secret → cùng OTP tại cùng thời điểm.
+        """
+        # Chuẩn hóa user_id để secret luôn giống nhau
+        uid = user_id.strip().upper()
+        return base64.b32encode(uid.encode()).decode('utf-8')
     
-    def generate_otp(self) -> str:
-        """Tạo mã OTP ngẫu nhiên"""
-        return ''.join(random.choices(string.digits, k=OTP_LENGTH))
+    def generate_otp(self, user_id: str) -> str:
+        """
+        Tạo mã TOTP cho người dùng dựa trên secret key (từ user_id)
+        và thời gian hiện tại.
+        
+        Args:
+            user_id (str): Mã định danh duy nhất của người dùng.
+            
+        Returns:
+            str: Mã OTP gồm 6 chữ số.
+        """
+        secret = self.get_user_secret(user_id)
+        
+        # Tạo đối tượng TOTP với secret cố định và cửa sổ thời gian 30 giây
+        totp = pyotp.TOTP(secret, interval=30)
+        
+        # Lấy mã OTP dựa trên thời gian hiện tại
+        otp = totp.now()
+        
+        print(f"[OTP Generated] user='{user_id}', secret='{secret}', otp='{otp}'")
+        
+        return otp
     
-    async def send_otp(self, email: str) -> dict:
+    async def send_otp(self, user_id: str, email: str) -> dict:
         """Gửi OTP qua email"""
         try:
             connection = db.get_connection()
@@ -46,7 +73,7 @@ class OTPService:
                 """, (email,))
                 
                 # Tạo mã OTP mới
-                otp_code = self.generate_otp()
+                otp_code = self.generate_otp(user_id=user_id)
                 expires_at = datetime.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
                 
                 # Lưu vào database

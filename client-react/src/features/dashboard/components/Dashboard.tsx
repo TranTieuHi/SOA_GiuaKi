@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui
 import { Button } from '../../../components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { CreditCard, History, Wallet, TrendingUp } from 'lucide-react';
-import { getCurrentUser } from '../../authentication/authService';
+import { getCurrentUser } from '../../authentication/services/authService';
 import { useState, useEffect } from 'react';
 import { getPaymentStatistics } from '../../../services/paymentService';
 import { PaymentStatistics } from '../../../types/payment';

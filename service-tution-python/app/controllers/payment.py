@@ -1,243 +1,470 @@
 from app.config.database import db, get_db_connection
-from app.models.payment import PaymentRequest, PaymentResponse
-from fastapi import HTTPException, Depends
-from app.middleware.auth_middleware import get_current_user
+from fastapi import HTTPException
 from datetime import datetime
 import pymysql
+import time
 
-async def pay_tuition(
-    request: PaymentRequest,
-    current_user: dict = Depends(get_current_user)
-) -> PaymentResponse:
-    """Pay tuition using optimistic locking (version) with retries"""
-    max_retries = 3
-    student_id = request.student_id
-    user_id = current_user.get("user_id")
-
-    for attempt in range(1, max_retries + 1):
-        connection = None
-        cursor = None
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor(pymysql.cursors.DictCursor)
-
-            # Start transaction
-            cursor.execute("START TRANSACTION")
-
-            # Read student row (get version)
-            cursor.execute(
-                "SELECT student_id, tuition_amount, is_payed, IFNULL(version, 0) as version "
-                "FROM students WHERE student_id = %s FOR UPDATE",
-                (student_id,)
-            )
-            student = cursor.fetchone()
-
-            if not student:
-                cursor.execute("ROLLBACK")
-                raise HTTPException(status_code=404, detail="Student not found")
-
-            if student["is_payed"]:
-                cursor.execute("ROLLBACK")
-                raise HTTPException(status_code=400, detail="Tuition already paid")
-
-            tuition_amount = float(student["tuition_amount"])
-            current_version = int(student["version"])
-
-            # Attempt to update student using version check
-            cursor.execute(
-                "UPDATE students SET is_payed = TRUE, version = version + 1 "
-                "WHERE student_id = %s AND version = %s",
-                (student_id, current_version)
-            )
-
-            if cursor.rowcount == 0:
-                # Version changed -> someone else updated. rollback and retry.
-                cursor.execute("ROLLBACK")
-                if attempt < max_retries:
-                    continue
-                else:
-                    raise HTTPException(status_code=409, detail="Payment conflict, please retry")
-
-            # Deduct user balance atomically (ensure sufficient funds)
-            cursor.execute(
-                "UPDATE users SET available_balance = available_balance - %s "
-                "WHERE user_id = %s AND available_balance >= %s",
-                (tuition_amount, user_id, tuition_amount)
-            )
-
-            if cursor.rowcount == 0:
-                # Insufficient balance or user missing
-                cursor.execute("ROLLBACK")
-                raise HTTPException(status_code=400, detail="Insufficient balance or user not found")
-
-            # Insert payment record
-            cursor.execute(
-                "INSERT INTO user_student_payment (user_id, student_id, payment_date) "
-                "VALUES (%s, %s, NOW())",
-                (user_id, student_id)
-            )
-            payment_id = cursor.lastrowid
-
-            # Commit transaction
-            connection.commit()
-
-            # Format response
-            return {
-                "success": True,
-                "message": "Payment successful",
-                "payment_id": payment_id,
-                "user_id": user_id,
-                "student_id": student_id,
-                "payment_date": datetime.now().isoformat(),
-                "amount_paid": float(tuition_amount)
-            }
-
-        except HTTPException:
-            # Known errors: rollback if transaction active, re-raise
-            if connection:
-                try:
-                    connection.rollback()
-                except Exception:
-                    pass
-            raise
-        except Exception as e:
-            # On DB errors: rollback and either retry (for optimistic conflicts) or raise
-            if connection:
-                try:
-                    connection.rollback()
-                except Exception:
-                    pass
-
-            # If last attempt, raise as 500
-            if attempt == max_retries:
-                print(f"❌ Payment error (final): {e}")
-                raise HTTPException(status_code=500, detail=f"Payment failed: {str(e)}")
-            else:
-                # log and retry
-                print(f"⚠️ Optimistic lock attempt {attempt} failed: {e} — retrying")
-                continue
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
-
-# ✅ UPDATED: Get payment history from user_student_payment table
-async def get_payment_history(
-    current_user: dict = Depends(get_current_user),
-    limit: int = 50,
-    offset: int = 0
-):
+def pay_tuition(payment_data: dict, current_user: dict):
     """
-    Get payment history for current user
+    Pay tuition - Deduct from user balance and update student payment status
+    """
+    connection = None
+    cursor = None
     
-    Args:
-        current_user: Current authenticated user
-        limit: Number of records to return
-        offset: Offset for pagination
-        
-    Returns:
-        List of payment records with student info
-    """
     try:
+        print(f"\n{'='*70}")
+        print(f"💳 PROCESSING PAYMENT")
+        print(f"{'='*70}")
+        print(f"   User ID: {current_user['user_id']}")
+        print(f"   Username: {current_user['username']}")
+        print(f"   Student ID: {payment_data.get('student_id')}")
+        
+        student_id = payment_data.get('student_id')
+        if not student_id:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "statusCode": 400,
+                    "message": "Student ID is required",
+                    "error": "MISSING_STUDENT_ID"
+                }
+            )
+        
         connection = get_db_connection()
         cursor = connection.cursor(pymysql.cursors.DictCursor)
         
-        user_id = current_user.get('user_id')
+        # Start transaction
+        connection.begin()
         
-        # ✅ Query từ bảng user_student_payment với student info
-        query = """
+        # 1. Get student info and lock row
+        print(f"\n📚 Step 1: Fetching student info...")
+        cursor.execute(
+            """
+            SELECT student_id, full_name, class, faculty, semester, 
+                   year, tuition_amount, is_payed, version
+            FROM students
+            WHERE student_id = %s
+            FOR UPDATE
+            """,
+            (student_id,)
+        )
+        student = cursor.fetchone()
+        
+        if not student:
+            connection.rollback()
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "statusCode": 404,
+                    "message": f"Student {student_id} not found",
+                    "error": "STUDENT_NOT_FOUND"
+                }
+            )
+        
+        print(f"   ✅ Student found: {student['full_name']}")
+        print(f"   Tuition amount: {student['tuition_amount']:,.0f} VND")
+        print(f"   Payment status: {'Paid' if student['is_payed'] else 'Unpaid'}")
+        
+        # Check if already paid
+        if student['is_payed']:
+            connection.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "statusCode": 400,
+                    "message": "Student has already paid tuition",
+                    "error": "ALREADY_PAID"
+                }
+            )
+        
+        tuition_amount = float(student['tuition_amount'])
+        
+        # 2. Get user balance and lock row
+        print(f"\n💰 Step 2: Checking user balance...")
+        cursor.execute(
+            """
+            SELECT user_id, username, email_address, full_name, available_balance
+            FROM users
+            WHERE user_id = %s
+            FOR UPDATE
+            """,
+            (current_user['user_id'],)
+        )
+        user = cursor.fetchone()
+        
+        if not user:
+            connection.rollback()
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "statusCode": 404,
+                    "message": "User not found",
+                    "error": "USER_NOT_FOUND"
+                }
+            )
+        
+        current_balance = float(user['available_balance'])
+        print(f"   Current balance: {current_balance:,.0f} VND")
+        print(f"   Required amount: {tuition_amount:,.0f} VND")
+        
+        # Check sufficient balance
+        if current_balance < tuition_amount:
+            connection.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "statusCode": 400,
+                    "message": "Insufficient balance",
+                    "error": "INSUFFICIENT_BALANCE",
+                    "current_balance": current_balance,
+                    "required_amount": tuition_amount
+                }
+            )
+        
+        # 3. Deduct balance from user
+        print(f"\n💸 Step 3: Deducting balance from user...")
+        new_balance = current_balance - tuition_amount
+        
+        cursor.execute(
+            """
+            UPDATE users
+            SET available_balance = %s
+            WHERE user_id = %s
+            """,
+            (new_balance, current_user['user_id'])
+        )
+        
+        print(f"   ✅ Balance deducted: {tuition_amount:,.0f} VND")
+        print(f"   New balance: {new_balance:,.0f} VND")
+        
+        # 4. Update student payment status (with optimistic locking)
+        print(f"\n✅ Step 4: Updating student payment status...")
+        
+        cursor.execute(
+            """
+            UPDATE students
+            SET is_payed = 1,
+                created_at = NOW(),
+                version = version + 1
+            WHERE student_id = %s AND version = %s
+            """,
+            (student_id, student['version'])
+        )
+        
+        if cursor.rowcount == 0:
+            connection.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "success": False,
+                    "statusCode": 409,
+                    "message": "Payment conflict - please try again",
+                    "error": "VERSION_CONFLICT"
+                }
+            )
+        
+        print(f"   ✅ Student payment status updated")
+        
+        # 5. Create payment history record
+        print(f"\n📝 Step 5: Creating payment history...")
+        payment_date = datetime.now()
+        
+        
+        cursor.execute(
+            """
+            INSERT INTO user_student_payment (user_id, student_id, payment_date)
+            VALUES (%s, %s, %s)
+            """,
+            (current_user['user_id'], student_id, payment_date)
+        )
+        payment_id = cursor.lastrowid
+        print(f" 	 ✅ Payment history created: ID {payment_id}")
+        
+        # 6. Commit transaction
+        print(f"\n💾 Step 6: Committing transaction...")
+        connection.commit()
+        
+        print(f"\n{'='*70}")
+        print(f"✅ PAYMENT SUCCESSFUL")
+        print(f"{'='*70}")
+        print(f"   Payment ID: {payment_id}")
+        print(f"   Student: {student['full_name']} ({student_id})")
+        print(f"   Amount: {tuition_amount:,.0f} VND")
+        print(f"   New balance: {new_balance:,.0f} VND")
+        print(f"{'='*70}\n")
+        
+        return {
+            "success": True,
+            "statusCode": 200,
+            "message": "Payment successful",
+            "data": {
+                "payment_id": payment_id,
+                "student_id": student_id,
+                "student_name": student['full_name'],
+                "student_class": student['class'],
+                "student_faculty": student['faculty'],
+                "amount_paid": tuition_amount,
+                "payment_date": payment_date.isoformat(),
+                "remaining_balance": new_balance
+            }
+        }
+        
+    except HTTPException:
+        if connection:
+            connection.rollback()
+        raise
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        print(f"\n❌ Payment error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "statusCode": 500,
+                "message": "Payment processing failed",
+                "error": str(e)
+            }
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            db.return_connection(connection)
+
+def get_payment_history(user_id: str):
+    """
+    Get payment history for a user
+    JOIN with students table to get student details
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"📋 FETCHING PAYMENT HISTORY")
+        print(f"{'='*60}")
+        print(f"   User ID: {user_id}")
+        
+        connection = get_db_connection()
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+        
+        # Get payment history with student details
+        cursor.execute(
+            """
             SELECT 
-                usp.payment_id,
-                usp.user_id,
-                usp.student_id,
-                usp.payment_date,
+                ph.payment_id,
+                ph.user_id,
+                ph.student_id,
+                ph.payment_date,
                 s.full_name as student_name,
-                s.class,
-                s.faculty,
+                s.class as student_class,
+                s.faculty as student_faculty,
                 s.semester,
                 s.year,
-                s.tuition_amount as amount_paid
-            FROM user_student_payment usp
-            JOIN students s ON usp.student_id = s.student_id
-            WHERE usp.user_id = %s
-            ORDER BY usp.payment_date DESC
-            LIMIT %s OFFSET %s
-        """
+                s.tuition_amount,
+                u.username,
+                u.full_name as user_full_name
+            FROM user_student_payment ph
+            INNER JOIN students s ON ph.student_id = s.student_id
+            INNER JOIN users u ON ph.user_id = u.user_id
+            WHERE ph.user_id = %s
+            ORDER BY ph.payment_date DESC
+            """,
+            (user_id,)
+        )
         
-        cursor.execute(query, (user_id, limit, offset))
         payments = cursor.fetchall()
         
-        # Get total count
-        count_query = "SELECT COUNT(*) as total FROM user_student_payment WHERE user_id = %s"
-        cursor.execute(count_query, (user_id,))
-        total = cursor.fetchone()['total']
+        print(f"   ✅ Found {len(payments)} payment(s)")
         
-        cursor.close()
-        connection.close()
-        
-        # Format dates
+        result = []
         for payment in payments:
-            if isinstance(payment['payment_date'], datetime):
-                payment['payment_date'] = payment['payment_date'].isoformat()
+            result.append({
+                "payment_id": payment["payment_id"],
+                "student_id": payment["student_id"],
+                "student_name": payment["student_name"],
+                "student_class": payment["student_class"],
+                "student_faculty": payment["student_faculty"],
+                "semester": payment["semester"],
+                "year": payment["year"],
+                "amount": float(payment["tuition_amount"] or 0),
+                "payment_date": payment["payment_date"].isoformat() if payment["payment_date"] else None,
+                "user_id": payment["user_id"],
+                "username": payment["username"],
+                "user_full_name": payment["user_full_name"]
+            })
+        
+        print(f"{'='*60}\n")
         
         return {
             "success": True,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "data": payments
+            "statusCode": 200,
+            "message": f"Found {len(result)} payment(s)",
+            "data": result
         }
         
     except Exception as e:
-        print(f"❌ Error getting payment history: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get payment history: {str(e)}")
+        print(f"❌ Get payment history error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "statusCode": 500,
+                "message": "Failed to get payment history",
+                "error": str(e)
+            }
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            db.return_connection(connection)
 
-# ✅ UPDATED: Get payment statistics from user_student_payment table
-async def get_payment_statistics(
-    current_user: dict = Depends(get_current_user)
-):
-    """Get payment statistics for current user"""
+# ✅ ADD THIS FUNCTION
+def get_all_payment_history():
+    """
+    Get all payment history (admin function)
+    JOIN with students and users tables
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"📋 FETCHING ALL PAYMENT HISTORY")
+        print(f"{'='*60}")
+        
+        connection = get_db_connection()
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+        
+        # Get all payment history with student details
+        cursor.execute(
+            """
+            SELECT 
+                ph.payment_id,
+                ph.user_id,
+                ph.student_id,
+                ph.payment_date,
+                s.full_name as student_name,
+                ...
+            FROM user_student_payment ph  -- <<< SỬA TÊN BẢNG
+            INNER JOIN students s ON ph.student_id = s.student_id
+            INNER JOIN users u ON ph.user_id = u.user_id
+            WHERE ph.user_id = %s
+            ORDER BY ph.payment_date DESC -- <<< SỬA TÊN CỘT
+            """,
+            (user_id,)
+        )
+                
+        payments = cursor.fetchall()
+        
+        print(f"   ✅ Found {len(payments)} payment(s)")
+        
+        result = []
+        for payment in payments:
+            result.append({
+                "payment_id": payment["payment_id"],
+                "student_id": payment["student_id"],
+                "student_name": payment["student_name"],
+                "student_class": payment["student_class"],
+                "student_faculty": payment["student_faculty"],
+                "semester": payment["semester"],
+                "year": payment["year"],
+                "amount": float(payment["tuition_amount"]),
+                "payment_date": payment["payment_date"].isoformat() if payment["payment_date"] else None,
+                "user_id": payment["user_id"],
+                "username": payment["username"],
+                "user_full_name": payment["user_full_name"]
+            })
+        
+        print(f"{'='*60}\n")
+        
+        return {
+            "success": True,
+            "statusCode": 200,
+            "message": f"Found {len(result)} payment(s)",
+            "data": result
+        }
+        
+    except Exception as e:
+        print(f"❌ Get all payment history error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "statusCode": 500,
+                "message": "Failed to get payment history",
+                "error": str(e)
+            }
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            db.return_connection(connection)
+
+# Thay thế hoàn toàn hàm cũ bằng hàm này
+def get_payment_statistics(user_id: str):
+    """
+    Get payment statistics for a specific user from the payment history.
+    """
+    connection = None
+    cursor = None
+    
     try:
         connection = get_db_connection()
         cursor = connection.cursor(pymysql.cursors.DictCursor)
         
-        user_id = current_user.get('user_id')
-        
-        # ✅ Get statistics từ user_student_payment và join với students
-        query = """
+        # Câu query mới để lấy thống kê từ lịch sử giao dịch của người dùng
+        cursor.execute(
+            """
             SELECT 
-                COUNT(*) as total_payments,
+                COUNT(ph.payment_id) as total_payments,
                 SUM(s.tuition_amount) as total_amount,
-                MIN(usp.payment_date) as first_payment,
-                MAX(usp.payment_date) as last_payment
-            FROM user_student_payment usp
-            JOIN students s ON usp.student_id = s.student_id
-            WHERE usp.user_id = %s
-        """
-        
-        cursor.execute(query, (user_id,))
+                MAX(ph.payment_date) as last_payment
+            FROM user_student_payment ph
+            INNER JOIN students s ON ph.student_id = s.student_id
+            WHERE ph.user_id = %s
+            """,
+            (user_id,)
+        )
         stats = cursor.fetchone()
         
-        cursor.close()
-        connection.close()
-        
-        # Format dates
-        if stats['first_payment'] and isinstance(stats['first_payment'], datetime):
-            stats['first_payment'] = stats['first_payment'].isoformat()
-        if stats['last_payment'] and isinstance(stats['last_payment'], datetime):
-            stats['last_payment'] = stats['last_payment'].isoformat()
-        
-        # Handle None values
-        stats['total_amount'] = float(stats['total_amount'] or 0)
-        stats['total_payments'] = int(stats['total_payments'] or 0)
-        
+        # Xử lý trường hợp người dùng chưa có giao dịch nào
+        last_payment_iso = None
+        if stats and stats.get("last_payment"):
+            last_payment_iso = stats["last_payment"].isoformat()
+
         return {
             "success": True,
-            "data": stats
+            "statusCode": 200,
+            "message": "Payment statistics retrieved successfully",
+            "data": {
+                "total_payments": stats.get("total_payments") or 0,
+                "total_amount": float(stats.get("total_amount") or 0),
+                "last_payment": last_payment_iso
+            }
         }
         
     except Exception as e:
-        print(f"❌ Error getting payment statistics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {str(e)}")
+        print(f"❌ Get payment statistics error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            db.return_connection(connection)

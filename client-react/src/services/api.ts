@@ -1,145 +1,130 @@
 import axios from 'axios';
-import type { 
-  LoginCredentials, 
-  LoginResponse, 
-  ForgotPasswordRequest, 
-  ResetPasswordRequest,
-  APIResponse 
-} from '../types/api';
 
-// Base URLs
-const API_BASE_URL = 'http://localhost:4000';
-const OTP_SERVICE_URL = 'http://localhost:8000';
+// Environment variables
+const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8000/api';
+const TUITION_API_URL = import.meta.env.VITE_TUITION_API_URL || 'http://localhost:8001/api';
+const OTP_API_URL = import.meta.env.VITE_OTP_API_URL || 'http://localhost:8002/api';
 
-// Create axios instance
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
+console.log('\n' + '='.repeat(70));
+console.log('🔧 API CONFIGURATION');
+console.log('='.repeat(70));
+console.log('🔐 Auth API:', AUTH_API_URL);
+console.log('💰 Tuition API:', TUITION_API_URL);
+console.log('📧 OTP API:', OTP_API_URL);
+console.log('='.repeat(70) + '\n');
+
+// Create axios instances
+export const authApi = axios.create({
+  baseURL: AUTH_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, // Important for session cookies
+  timeout: 10000,
 });
 
-// Request interceptor
-apiClient.interceptors.request.use(
-  (config) => {
-    console.log('🔄 API Request:', config.method?.toUpperCase(), config.url, config.data);
-    return config;
+export const tuitionApi = axios.create({
+  baseURL: TUITION_API_URL,
+  headers: {
+    'Content-Type': 'application/json',
   },
-  (error) => {
-    console.error('❌ Request Error:', error);
-    return Promise.reject(error);
+  timeout: 10000,
+});
+
+export const otpApi = axios.create({
+  baseURL: OTP_API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 10000,
+});
+
+// Request interceptor - Add token and log
+const addAuthToken = (config: any) => {
+  const token = localStorage.getItem('token');
+  
+  console.log('📤 Outgoing Request:');
+  console.log('   Method:', config.method?.toUpperCase());
+  console.log('   Base URL:', config.baseURL);
+  console.log('   URL:', config.url);
+  console.log('   Full URL:', `${config.baseURL}${config.url}`);
+  console.log('   Params:', config.params || 'None');
+  console.log('   Data:', config.data || 'None');
+  
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+    console.log('   🔑 Token: Added');
+  } else {
+    console.log('   🔑 Token: Not present');
   }
-);
-
-// Response interceptor
-apiClient.interceptors.response.use(
-  (response) => {
-    console.log('✅ API Response:', response.status, response.data);
-    return response;
-  },
-  (error) => {
-    console.error('❌ API Error:', error.response?.status, error.response?.data);
-    
-    // Handle specific error cases
-    if (error.response?.status === 400) {
-      throw new Error(error.response.data?.message || 'Bad request');
-    } else if (error.response?.status === 401) {
-      throw new Error('Invalid credentials');
-    } else if (error.response?.status === 500) {
-      throw new Error('Server error. Please try again later.');
-    } else if (error.code === 'ECONNREFUSED') {
-      throw new Error('Cannot connect to server. Please check if backend is running.');
-    }
-    
-    return Promise.reject(error);
-  }
-);
-
-// Auth API calls
-export const authAPI = {
-  // Login
-  login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
-    try {
-      console.log('🔑 Attempting login for:', credentials.email);
-      const response = await apiClient.post('/auth/login', credentials);
-      return response.data;
-    } catch (error: any) {
-      console.error('❌ Login failed:', error.message);
-      throw error;
-    }
-  },
-
-  // Logout
-  logout: async (): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.post('/auth/logout');
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Logout failed');
-    }
-  },
-
-  // Forgot Password
-  forgotPassword: async (data: ForgotPasswordRequest): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.post('/password/forgot', data);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Request failed');
-    }
-  },
-
-  // Reset Password
-  resetPassword: async (data: ResetPasswordRequest): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.post('/password/reset', data);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Reset failed');
-    }
-  },
-
-  // Check reset token
-  checkResetToken: async (email: string, token: string): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.get(`/password/check-token/${email}/${token}`);
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Token validation failed');
-    }
-  }
+  
+  return config;
 };
 
-// OTP API calls
-export const otpAPI = {
-  // Generate OTP
-  generateOTP: async (userId: string, email: string): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.post('/otp/generate', {
-        userId,
-        email
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'OTP generation failed');
-    }
-  },
-
-  // Verify OTP
-  verifyOTP: async (userId: string, email: string, otp: string): Promise<APIResponse> => {
-    try {
-      const response = await apiClient.post('/otp/verify', {
-        userId,
-        email,
-        otp
-      });
-      return response.data;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'OTP verification failed');
-    }
-  }
+// Response interceptor - Handle errors and log
+const handleResponse = (response: any) => {
+  console.log('📥 Response Received:');
+  console.log('   Status:', response.status);
+  console.log('   URL:', response.config.url);
+  console.log('   Data:', response.data);
+  return response;
 };
 
-export default apiClient;
+const handleResponseError = (error: any) => {
+  console.error('\n' + '='.repeat(70));
+  console.error('❌ API ERROR INTERCEPTOR');
+  console.error('='.repeat(70));
+  
+  if (error.response) {
+    console.error('📊 Response Details:');
+    console.error('   Status:', error.response.status);
+    console.error('   Status Text:', error.response.statusText);
+    console.error('   URL:', error.config?.url);
+    console.error('   Base URL:', error.config?.baseURL);
+    console.error('   Method:', error.config?.method?.toUpperCase());
+    console.error('   Data:', error.response.data);
+    
+    // Handle 401 Unauthorized
+    if (error.response.status === 401) {
+      console.warn('⚠️ Unauthorized - clearing token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      
+      if (window.location.pathname !== '/login') {
+        console.warn('⚠️ Redirecting to login...');
+        window.location.href = '/login';
+      }
+    }
+    
+    // Handle 404 Not Found
+    if (error.response.status === 404) {
+      console.error('⚠️ Resource not found (404)');
+      console.error('   Requested URL:', error.request?.responseURL || 'N/A');
+      console.error('   Check if service is running on correct port');
+    }
+  } else if (error.request) {
+    console.error('📡 Request Error (No Response):');
+    console.error('   Message:', error.message);
+    console.error('   Request URL:', error.config?.url);
+    console.error('   Base URL:', error.config?.baseURL);
+    console.error('   ⚠️ Service might not be running!');
+  } else {
+    console.error('⚠️ Setup Error:');
+    console.error('   Message:', error.message);
+  }
+  
+  console.error('='.repeat(70) + '\n');
+  
+  return Promise.reject(error);
+};
+
+// Apply interceptors
+authApi.interceptors.request.use(addAuthToken);
+authApi.interceptors.response.use(handleResponse, handleResponseError);
+
+tuitionApi.interceptors.request.use(addAuthToken);
+tuitionApi.interceptors.response.use(handleResponse, handleResponseError);
+
+otpApi.interceptors.request.use(addAuthToken);
+otpApi.interceptors.response.use(handleResponse, handleResponseError);
+
+export default { authApi, tuitionApi, otpApi };

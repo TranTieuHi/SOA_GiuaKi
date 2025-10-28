@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCurrentUser, isAuthenticated } from '../authentication/authService';
+import { getCurrentUser, isAuthenticated } from '../authentication/services/authService';
 import { User } from '../../types/user';
 import { Dashboard } from './components/Dashboard';
 import { MainLayout } from '../../components/layout/MainLayout'; // ✅ Import Layout

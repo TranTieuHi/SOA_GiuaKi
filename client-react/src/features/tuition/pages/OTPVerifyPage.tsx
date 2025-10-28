@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '../../../components/ui/alert';
 import { Shield, Loader2, AlertCircle, ArrowLeft, CheckCircle, Clock } from 'lucide-react';
 import { MainLayout } from '../../../components/layout/MainLayout';
 import { StudentInfoCard } from '../components/StudentInfoCard';
-import { getCurrentUser } from '../../authentication/authService';
+import { getCurrentUser } from '../../authentication/services/authService';
 import { generateOTP, sendOTP, verifyOTP } from '../../../services/otpService';
 import { payTuition } from '../../../services/tuitionService';
 import { Student } from '../../../types/tuition';

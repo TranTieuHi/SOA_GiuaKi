@@ -8,7 +8,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Search, GraduationCap, CreditCard, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { searchStudent, payTuition } from '../../services/tuitionService';
-import { getCurrentUser } from '../authentication/authService';
+import { getCurrentUser } from '../authentication/services/authService';
 import { Student, PaymentResponse } from '../../types/tuition';
 import { MainLayout } from '../../components/layout/MainLayout';
 

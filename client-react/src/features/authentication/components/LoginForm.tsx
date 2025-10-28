@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { Eye, EyeOff, GraduationCap, AlertCircle } from 'lucide-react';
-import { login } from '../authService';
+import { login } from '../services/authService'; // ✅ Updated import path
 
 export function LoginForm() {
   const [formData, setFormData] = useState({
@@ -24,12 +24,8 @@ export function LoginForm() {
     setError('');
 
     try {
-      console.log('🔄 Attempting login with:', {
-        username: formData.username,
-        password: '***hidden***'
-      });
+      console.log('🔄 Attempting login...');
       
-      // ✅ FIX: Sử dụng formData
       const response = await login({ 
         username: formData.username, 
         password: formData.password 
@@ -37,12 +33,12 @@ export function LoginForm() {
       
       console.log('✅ Login successful:', response);
       
-      // Check token đã được lưu
+      // Verify token saved
       const savedToken = localStorage.getItem('token');
       const savedUser = localStorage.getItem('user');
       
-      console.log('💾 Token saved in localStorage:', savedToken ? 'Yes' : 'No');
-      console.log('💾 User saved in localStorage:', savedUser ? 'Yes' : 'No');
+      console.log('💾 Token saved:', savedToken ? 'Yes' : 'No');
+      console.log('💾 User saved:', savedUser ? 'Yes' : 'No');
       
       if (!savedToken) {
         console.error('❌ Token was not saved!');

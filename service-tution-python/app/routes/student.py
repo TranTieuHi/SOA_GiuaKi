@@ -1,37 +1,50 @@
-from fastapi import APIRouter, Query
-from app.models.student import StudentSearchRequest, StudentResponse, StudentListResponse
-from app.controllers import student as student_controller
-from app.middleware.auth_middleware import verify_token
-from fastapi import Depends
-from typing import Optional
+from fastapi import APIRouter, Query, Request
+from app.controllers.student import search_student_by_id, get_all_students, get_unpaid_students
 
-router = APIRouter(prefix="/students", tags=["Students"])
+# ✅ Add prefix here instead of main.py
+router = APIRouter(prefix="/students")
 
-@router.get("/search", response_model=StudentResponse, dependencies=[Depends(verify_token)])
+@router.get("/search")
 async def search_student(
-    student_id: Optional[str] = Query(None, description="Mã sinh viên"),
-    full_name: Optional[str] = Query(None, description="Tên sinh viên"),
-    semester: Optional[str] = Query(None, description="Học kỳ (Fall 2024, Spring 2025)"),
-    year: Optional[int] = Query(None, description="Năm học")
+    request: Request,
+    student_id: str = Query(..., description="Student ID to search")
 ):
-    """Tìm kiếm sinh viên theo student_id, full_name, semester, hoặc year"""
-    search_params = StudentSearchRequest(
-        student_id=student_id,
-        full_name=full_name,
-        semester=semester,
-        year=year
-    )
-    return student_controller.search_student(search_params)
+    """
+    Search student by ID
+    GET /students/search?student_id=ST2025004
+    """
+    print(f"\n{'='*70}")
+    print(f"📨 INCOMING REQUEST")
+    print(f"{'='*70}")
+    print(f"   Method: {request.method}")
+    print(f"   URL: {request.url}")
+    print(f"   Path: {request.url.path}")
+    print(f"   Query Params: {dict(request.query_params)}")
+    print(f"   Student ID: {student_id}")
+    print(f"{'='*70}\n")
+    
+    return search_student_by_id(student_id)
 
-@router.get("/", response_model=StudentListResponse, dependencies=[Depends(verify_token)])
-async def get_all_students():
-    """Lấy danh sách tất cả sinh viên"""
-    return student_controller.get_all_students()
+@router.get("/")
+async def get_students():
+    """
+    Get all students
+    GET /students/
+    """
+    return get_all_students()
 
-@router.get("/unpaid", response_model=StudentListResponse, dependencies=[Depends(verify_token)])
-async def get_unpaid_students(
-    semester: Optional[str] = Query(None, description="Học kỳ"),
-    year: Optional[int] = Query(None, description="Năm học")
-):
-    """Lấy danh sách sinh viên chưa thanh toán, có thể filter theo semester/year"""
-    return student_controller.get_unpaid_students(semester, year)
+@router.get("/unpaid")
+async def get_unpaid():
+    """
+    Get unpaid students
+    GET /students/unpaid
+    """
+    return get_unpaid_students()
+
+@router.get("/search/{student_id}")
+async def search_by_path(student_id: str):
+    """
+    Search student by ID (path parameter)
+    GET /students/search/ST2025004
+    """
+    return search_student_by_id(student_id)

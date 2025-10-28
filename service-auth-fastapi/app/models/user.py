@@ -12,22 +12,11 @@ class User(BaseModel):
 
 class RegisterRequest(BaseModel):
     """Model cho Register request"""
-    username: str = Field(..., min_length=3, max_length=50, description="Username (3-50 ký tự)")
-    password: str = Field(..., min_length=6, description="Password (tối thiểu 6 ký tự)")
-    email_address: EmailStr = Field(..., description="Email address")
-    full_name: str = Field(..., min_length=1, max_length=100, description="Họ tên đầy đủ")
-    phone_number: Optional[str] = Field(None, max_length=20, description="Số điện thoại")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "username": "johndoe",
-                "password": "password123",
-                "email_address": "johndoe@example.com",
-                "full_name": "John Doe",
-                "phone_number": "1234567890"
-            }
-        }
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6)
+    email_address: EmailStr = Field(...) # Tên đúng là email_address
+    full_name: str = Field(..., min_length=1, max_length=100)
+    phone_number: Optional[str] = Field(None, max_length=20)
 
 class LoginRequest(BaseModel):
     """Model cho Login request"""

@@ -187,7 +187,7 @@ export function PaymentHistoryPage() {
                             {new Intl.NumberFormat('vi-VN', {
                               style: 'currency',
                               currency: 'VND',
-                            }).format(payment.amount_paid)}
+                            }).format(payment.amount || 0)} {/* Đổi thành payment.amount */}
                           </TableCell>
                         </TableRow>
                       ))}

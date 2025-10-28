@@ -1,51 +1,67 @@
-"""
-Script để update password cho users đã có trong database
-Chạy 1 lần duy nhất sau khi thêm password hashing
-"""
+import sys
+sys.path.append('..')
 
-from app.config.database import db
 from app.utils.password_helper import hash_password
+from app.config.database import get_db_connection, db
+import pymysql
 
-def update_existing_passwords():
-    """Update passwords cho users có sẵn"""
+def update_passwords():
+    """Update passwords for existing users"""
     
-    # Danh sách users và password mới
-    users_passwords = [
-        ('johndoe', 'password123'),
-        ('janedoe', 'password456'),
-        ('admin', 'admin123')
+    users = [
+        {"username": "johndoe", "password": "password123"},
+        {"username": "janedoe", "password": "password456"},
+        {"username": "admin", "password": "admin123"}
     ]
     
+    connection = None
     try:
-        connection = db.get_connection()
+        connection = get_db_connection()
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
         
-        with connection.cursor() as cursor:
-            for username, plain_password in users_passwords:
-                # Hash password
-                hashed_password = hash_password(plain_password)
-                
-                # Update trong database
-                cursor.execute("""
-                    UPDATE users 
-                    SET password = %s 
-                    WHERE username = %s
-                """, (hashed_password, username))
-                
-                print(f"✅ Updated password for: {username}")
+        print("=" * 50)
+        print("🔒 Updating passwords for existing users...")
+        print("=" * 50)
+        
+        for user in users:
+            # Hash password
+            password_hash = hash_password(user["password"])
+            
+            # Update password
+            cursor.execute(
+                """
+                UPDATE users 
+                SET password = %s 
+                WHERE username = %s
+                """,
+                (password_hash, user["username"])
+            )
+            
+            if cursor.rowcount > 0:
+                print(f"✅ Updated password for: {user['username']}")
+            else:
+                print(f"⚠️  User not found: {user['username']}")
+        
+        connection.commit()
+        cursor.close()
         
         print("\n🎉 All passwords updated successfully!")
         print("\n📝 Login credentials:")
-        for username, password in users_passwords:
-            print(f"   - Username: {username}, Password: {password}")
+        print("   - Username: johndoe, Password: password123")
+        print("   - Username: janedoe, Password: password456")
+        print("   - Username: admin, Password: admin123")
+        print("=" * 50)
         
     except Exception as e:
+        if connection:
+            connection.rollback()
         print(f"❌ Error updating passwords: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
-        db.close()
+        if connection:
+            db.return_connection(connection)
 
 if __name__ == "__main__":
-    print("🔒 Updating passwords for existing users...")
-    print("=" * 50)
-    update_existing_passwords()
+    update_passwords()

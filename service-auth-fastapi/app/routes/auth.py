@@ -1,15 +1,27 @@
-from fastapi import APIRouter
-from app.models.user import LoginRequest, RegisterRequest, LoginResponse
-from app.controllers import auth
+from fastapi import APIRouter, Depends, HTTPException
+from app.controllers.auth import login_user, register_user
+from app.models.user import LoginRequest, RegisterRequest
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter()
 
-@router.post("/login", response_model=LoginResponse)
-def login_endpoint(credentials: LoginRequest):
-    """API đăng nhập"""
-    return auth.login_user(credentials)
-
-@router.post("/register", status_code=201)
-def register_endpoint(data: RegisterRequest):
-    """API đăng ký"""
-    return auth.register_user(data)
+@router.post("/login")  # ✅ /api/auth/login
+def login(credentials: LoginRequest):  # <--- XÓA ASYNC
+    """
+    Login user and return JWT token
+    """
+    return login_user(credentials)
+  
+@router.post("/register")  # ✅ /api/auth/register
+def register(user_data: RegisterRequest):
+    """
+    Register new user
+    
+    POST /api/auth/register
+    {
+      "username": "johndoe",
+      "email": "john@example.com",
+      "password": "password123",
+      "full_name": "John Doe"
+    }
+    """
+    return register_user(user_data)

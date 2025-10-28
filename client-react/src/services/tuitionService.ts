@@ -1,137 +1,123 @@
-import apiClient from './apiClient';
-import { Student, StudentListResponse, PaymentRequest, PaymentResponse, PaymentHistoryResponse } from '../types/tuition';
+import { tuitionApi } from './api';
 
-const TUITION_API_BASE = 'http://localhost:8001/api';
+export interface Student {
+  student_id: string;
+  full_name: string;
+  class: string;
+  faculty: string;
+  semester: string;
+  year: number;  // ✅ Changed from academic_year: string to year: number
+  tuition_amount: number;
+  is_payed: boolean;
+  created_at: string | null;
+  version: number;
+}
 
-// Tạo axios instance riêng cho Tuition Service
-const tuitionClient = apiClient.create({
-  baseURL: TUITION_API_BASE,
-});
+export interface SearchStudentResponse {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  data: Student;
+}
 
-// Copy interceptors từ apiClient
-tuitionClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-/**
- * Tìm kiếm sinh viên theo student_id
- */
 export const searchStudent = async (studentId: string): Promise<Student> => {
   try {
-    console.log(`🔍 Searching for student: ${studentId}`);
-    const response = await tuitionClient.get<Student>(`/students/search`, {
-      params: { student_id: studentId }
-    });
-    console.log('✅ Student found:', response.data);
-    return response.data;
-  } catch (error: any) {
-    console.error('❌ Error searching student:', error);
+    console.log('\n' + '='.repeat(60));
+    console.log('🔍 SEARCH STUDENT REQUEST');
+    console.log('='.repeat(60));
+    console.log('📝 Student ID:', studentId);
+    console.log('🌐 API Base URL:', tuitionApi.defaults.baseURL);
+    console.log('🔗 Full URL:', `${tuitionApi.defaults.baseURL}/students/search?student_id=${studentId}`);
+    console.log('='.repeat(60));
     
-    if (error.response) {
-      const { status, data } = error.response;
-      const errorDetail = data.detail || data;
-      
-      switch (status) {
-        case 404:
-          throw new Error(errorDetail.message || 'Không tìm thấy sinh viên');
-        case 401:
-          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
-        default:
-          throw new Error(errorDetail.message || 'Lỗi tìm kiếm sinh viên');
+    const response = await tuitionApi.get<SearchStudentResponse>(
+      '/students/search',
+      {
+        params: { student_id: studentId }
       }
+    );
+    
+    console.log('✅ RESPONSE RECEIVED');
+    console.log('   Status:', response.status);
+    console.log('   Data:', response.data);
+    console.log('='.repeat(60) + '\n');
+    
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Search failed');
     }
     
-    throw new Error('Không thể kết nối đến Tuition Service');
+    return response.data.data;
+  } catch (error: any) {
+    console.error('\n' + '='.repeat(60));
+    console.error('❌ SEARCH STUDENT ERROR');
+    console.error('='.repeat(60));
+    
+    if (error.response) {
+      console.error('📊 Response Error:');
+      console.error('   Status:', error.response.status);
+      console.error('   Status Text:', error.response.statusText);
+      console.error('   Data:', error.response.data);
+      console.error('   Headers:', error.response.headers);
+      console.error('   Config URL:', error.config?.url);
+      console.error('   Config Base URL:', error.config?.baseURL);
+      console.error('   Full Request URL:', error.request?.responseURL || 'N/A');
+    } else if (error.request) {
+      console.error('📡 Request Error (No Response):');
+      console.error('   Request:', error.request);
+      console.error('   Message:', error.message);
+    } else {
+      console.error('⚠️ Setup Error:');
+      console.error('   Message:', error.message);
+    }
+    
+    console.error('   Error Code:', error.code);
+    console.error('   Error Name:', error.name);
+    console.error('='.repeat(60) + '\n');
+    
+    throw error;
   }
 };
 
-/**
- * Lấy danh sách tất cả sinh viên
- */
-export const getAllStudents = async (): Promise<StudentListResponse> => {
+export const getAllStudents = async (): Promise<Student[]> => {
   try {
-    const response = await tuitionClient.get<StudentListResponse>('/students/');
-    return response.data;
-  } catch (error: any) {
-    console.error('❌ Error getting all students:', error);
-    throw new Error(error.response?.data?.detail?.message || 'Lỗi lấy danh sách sinh viên');
+    const response = await tuitionApi.get<{success: boolean; data: Student[]}>('/students/');
+    return response.data.data;
+  } catch (error) {
+    console.error('❌ Get all students error:', error);
+    throw error;
   }
 };
 
-/**
- * Lấy danh sách sinh viên chưa thanh toán
- */
-export const getUnpaidStudents = async (): Promise<StudentListResponse> => {
+export const getUnpaidStudents = async (): Promise<Student[]> => {
   try {
-    const response = await tuitionClient.get<StudentListResponse>('/students/unpaid');
-    return response.data;
-  } catch (error: any) {
-    console.error('❌ Error getting unpaid students:', error);
-    throw new Error(error.response?.data?.detail?.message || 'Lỗi lấy danh sách sinh viên chưa thanh toán');
+    const response = await tuitionApi.get<{success: boolean; data: Student[]}>('/students/unpaid');
+    return response.data.data;
+  } catch (error) {
+    console.error('❌ Get unpaid students error:', error);
+    throw error;
   }
 };
 
-/**
- * Thanh toán học phí
- */
-export const payTuition = async (paymentData: PaymentRequest): Promise<PaymentResponse> => {
+export const payTuition = async (paymentData: any) => {
   try {
-    console.log('💳 Processing payment for student:', paymentData.student_id);
-    const response = await tuitionClient.post<PaymentResponse>('/payments/pay', paymentData);
-    console.log('✅ Payment successful:', response.data);
+    console.log('💳 Paying tuition:', paymentData);
+    const response = await tuitionApi.post('/payments/pay', paymentData);
+    console.log('✅ Payment response:', response.data);
     return response.data;
-  } catch (error: any) {
+  } catch (error) {
     console.error('❌ Payment error:', error);
-    
-    if (error.response) {
-      const { status, data } = error.response;
-      const errorDetail = data.detail || data;
-      
-      switch (status) {
-        case 400:
-          throw new Error(errorDetail.message || 'Dữ liệu thanh toán không hợp lệ');
-        case 404:
-          throw new Error(errorDetail.message || 'Không tìm thấy sinh viên');
-        case 401:
-          throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
-        default:
-          throw new Error(errorDetail.message || 'Thanh toán thất bại');
-      }
-    }
-    
-    throw new Error('Không thể kết nối đến Tuition Service');
+    throw error;
   }
 };
 
-/**
- * Lấy lịch sử thanh toán của user
- */
-export const getPaymentHistory = async (): Promise<PaymentHistoryResponse> => {
+export const getPaymentHistory = async (userId: string) => {
   try {
-    const response = await tuitionClient.get<PaymentHistoryResponse>('/payments/history');
+    console.log('📋 Getting payment history for user:', userId);
+    const response = await tuitionApi.get(`/payments/history?user_id=${userId}`);
+    console.log('✅ Payment history:', response.data);
     return response.data;
-  } catch (error: any) {
-    console.error('❌ Error getting payment history:', error);
-    throw new Error(error.response?.data?.detail?.message || 'Lỗi lấy lịch sử thanh toán');
-  }
-};
-
-/**
- * Lấy tất cả lịch sử thanh toán (Admin)
- */
-export const getAllPayments = async (): Promise<PaymentHistoryResponse> => {
-  try {
-    const response = await tuitionClient.get<PaymentHistoryResponse>('/payments/all');
-    return response.data;
-  } catch (error: any) {
-    console.error('❌ Error getting all payments:', error);
-    throw new Error(error.response?.data?.detail?.message || 'Lỗi lấy lịch sử thanh toán');
+  } catch (error) {
+    console.error('❌ Payment history error:', error);
+    throw error;
   }
 };
