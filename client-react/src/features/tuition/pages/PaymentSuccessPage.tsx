@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
 import { Separator } from '../../../components/ui/separator';
-import { CheckCircle, Home, Receipt, ArrowRight } from 'lucide-react';
+import { CheckCircle, Home, Receipt, ArrowRight, User, GraduationCap } from 'lucide-react';
 import { MainLayout } from '../../../components/layout/MainLayout';
 import { PaymentResponse } from '../../../types/tuition';
+import { getUserProfile, UserProfile, refreshUserData } from '../../../services/authService'; // ✅ Fixed import
 import Confetti from 'react-confetti';
 import { useWindowSize } from '@uidotdev/usehooks';
 
@@ -13,45 +14,108 @@ export function PaymentSuccessPage() {
   const navigate = useNavigate();
   const { width, height } = useWindowSize();
   const [paymentResult, setPaymentResult] = useState<PaymentResponse | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showConfetti, setShowConfetti] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Lấy kết quả thanh toán từ sessionStorage
-    const storedResult = sessionStorage.getItem('payment_result');
-    if (!storedResult) {
-      navigate('/tuition');
-      return;
-    }
-    setPaymentResult(JSON.parse(storedResult));
+    const loadPaymentData = async () => {
+      try {
+        // Lấy kết quả thanh toán từ sessionStorage
+        const storedResult = sessionStorage.getItem('payment_result');
+        if (!storedResult) {
+          navigate('/tuition');
+          return;
+        }
 
-    // Tắt confetti sau 5 giây
-    const timer = setTimeout(() => setShowConfetti(false), 5000);
-    return () => clearTimeout(timer);
+        const paymentData = JSON.parse(storedResult);
+        setPaymentResult(paymentData);
+
+        // ✅ Set flag for Dashboard to know user just completed payment
+        sessionStorage.setItem('just_completed_payment', 'true');
+
+        // ✅ Refresh user data in localStorage với số dư mới
+        console.log('🔄 Refreshing user data after successful payment...');
+        await refreshUserData();
+
+        // Lấy thông tin user profile
+        const profile = await getUserProfile();
+        setUserProfile(profile);
+
+        setLoading(false);
+
+        // Tắt confetti sau 5 giây
+        const timer = setTimeout(() => setShowConfetti(false), 5000);
+        return () => clearTimeout(timer);
+      } catch (error) {
+        console.error('❌ Error loading payment data:', error);
+        navigate('/tuition');
+      }
+    };
+
+    loadPaymentData();
   }, [navigate]);
 
-  const handleNewPayment = () => {
+  const handleNewPayment = async () => {
+    // ✅ Refresh user data trước khi chuyển trang
+    try {
+      await refreshUserData();
+    } catch (error) {
+      console.error('Failed to refresh user data:', error);
+    }
+    
     // Xóa dữ liệu cũ
     sessionStorage.removeItem('payment_student');
     sessionStorage.removeItem('payment_result');
     navigate('/tuition');
   };
 
-  const handleGoHome = () => {
+  const handleGoHome = async () => {
+    // ✅ Refresh user data trước khi về trang chủ
+    try {
+      await refreshUserData();
+      sessionStorage.setItem('just_completed_payment', 'true'); // Set flag
+    } catch (error) {
+      console.error('Failed to refresh user data:', error);
+    }
+    
     // Xóa dữ liệu cũ
     sessionStorage.removeItem('payment_student');
     sessionStorage.removeItem('payment_result');
-    navigate('/');
+    
+    // Navigate with state to force refresh
+    navigate('/dashboard', { state: { forceRefresh: true } });
   };
 
-  const handleViewHistory = () => {
+  const handleViewHistory = async () => {
+    // ✅ Refresh user data trước khi xem lịch sử
+    try {
+      await refreshUserData();
+    } catch (error) {
+      console.error('Failed to refresh user data:', error);
+    }
+    
     // Xóa dữ liệu cũ
     sessionStorage.removeItem('payment_student');
     sessionStorage.removeItem('payment_result');
     navigate('/payment-history');
   };
 
-  if (!paymentResult) {
-    return null;
+  if (loading || !paymentResult || !userProfile) {
+    return (
+      <MainLayout>
+        <div className="max-w-4xl mx-auto">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-3">Đang tải thông tin thanh toán...</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </MainLayout>
+    );
   }
 
   return (
@@ -91,27 +155,67 @@ export function PaymentSuccessPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Transaction Info */}
+            {/* Student Info */}
             <div className="space-y-3">
-              <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Mã giao dịch:</span>
-                <strong className="text-blue-600">#{paymentResult.payment_id}</strong>
-              </div>
-
+              <h3 className="text-lg font-semibold flex items-center text-blue-600">
+                <GraduationCap className="w-5 h-5 mr-2" />
+                Thông tin sinh viên
+              </h3>
+              
               <div className="flex justify-between py-2">
                 <span className="text-muted-foreground">Mã sinh viên:</span>
-                <strong>{paymentResult.student_id}</strong>
+                <strong className="text-blue-600">{paymentResult.data.student_id}</strong>
               </div>
 
               <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Người thanh toán:</span>
-                <strong>{paymentResult.user_id}</strong>
+                <span className="text-muted-foreground">Tên sinh viên:</span>
+                <strong>{paymentResult.data.student_name}</strong>
               </div>
 
               <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Thời gian:</span>
+                <span className="text-muted-foreground">Lớp:</span>
+                <strong>{paymentResult.data.student_class}</strong>
+              </div>
+
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Khoa:</span>
+                <strong>{paymentResult.data.student_faculty}</strong>
+              </div>
+
+              <Separator />
+
+              {/* User Info */}
+              <h3 className="text-lg font-semibold flex items-center text-green-600">
+                <User className="w-5 h-5 mr-2" />
+                Người thanh toán
+              </h3>
+
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Họ và tên:</span>
+                <strong>{userProfile.full_name}</strong>
+              </div>
+
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Tài khoản:</span>
+                <strong>{userProfile.username}</strong>
+              </div>
+
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Email:</span>
+                <strong>{userProfile.email_address}</strong>
+              </div>
+
+              <Separator />
+
+              {/* Payment Info */}
+              <h3 className="text-lg font-semibold text-purple-600">
+                Thông tin thanh toán
+              </h3>
+
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Thời gian thanh toán:</span>
                 <strong>
-                  {new Date(paymentResult.payment_date).toLocaleString('vi-VN', {
+                  {new Date(paymentResult.data.payment_date).toLocaleString('vi-VN', {
                     year: 'numeric',
                     month: '2-digit',
                     day: '2-digit',
@@ -122,25 +226,23 @@ export function PaymentSuccessPage() {
                 </strong>
               </div>
 
-              <Separator />
-
               <div className="flex justify-between py-2">
                 <span className="text-muted-foreground">Số tiền đã thanh toán:</span>
                 <strong className="text-2xl text-green-600">
                   {new Intl.NumberFormat('vi-VN', {
                     style: 'currency',
                     currency: 'VND',
-                  }).format(paymentResult.amount_paid || 0)}
+                  }).format(paymentResult.data.amount_paid)}
                 </strong>
               </div>
 
               <div className="flex justify-between py-2">
-                <span className="text-muted-foreground">Số dư còn lại:</span>
+                <span className="text-muted-foreground">Số dư tài khoản còn lại:</span>
                 <strong className="text-xl text-blue-600">
                   {new Intl.NumberFormat('vi-VN', {
                     style: 'currency',
                     currency: 'VND',
-                  }).format(paymentResult.remaining_balance)}
+                  }).format(paymentResult.data.remaining_balance)}
                 </strong>
               </div>
             </div>
@@ -151,7 +253,10 @@ export function PaymentSuccessPage() {
                 ✅ <strong>{paymentResult.message}</strong>
               </p>
               <p className="text-center text-sm text-muted-foreground mt-2">
-                Biên lai thanh toán đã được gửi đến email của bạn
+                Học phí đã được thanh toán thành công cho sinh viên <strong>{paymentResult.data.student_name}</strong>
+              </p>
+              <p className="text-center text-sm text-muted-foreground">
+                Biên lai thanh toán đã được gửi đến email: <strong>{userProfile.email_address}</strong>
               </p>
             </div>
           </CardContent>
@@ -196,10 +301,10 @@ export function PaymentSuccessPage() {
             <div className="space-y-2 text-sm text-blue-800">
               <p>📌 <strong>Lưu ý quan trọng:</strong></p>
               <ul className="list-disc list-inside space-y-1 ml-4">
-                <li>Vui lòng kiểm tra email để nhận biên lai điện tử</li>
-                <li>Mã giao dịch có thể được sử dụng để tra cứu sau này</li>
-                <li>Nếu có bất kỳ thắc mắc, vui lòng liên hệ bộ phận hỗ trợ</li>
-                <li>Thông tin thanh toán đã được cập nhật vào hệ thống</li>
+                <li>Vui lòng kiểm tra email <strong>{userProfile.email_address}</strong> để nhận biên lai điện tử</li>
+                <li>Thông tin thanh toán đã được cập nhật vào hệ thống trường</li>
+                <li>Sinh viên <strong>{paymentResult.data.student_name}</strong> đã hoàn thành việc đóng học phí</li>
+                <li>Nếu có bất kỳ thắc mắc, vui lòng liên hệ bộ phận tài chính trường</li>
               </ul>
             </div>
           </CardContent>

@@ -23,21 +23,33 @@ export interface PaymentRequest {
 
 export interface PaymentResponse {
   success: boolean;
+  statusCode: number;
   message: string;
-  user_id: string;
-  student_id: string;
-  student_name: string;
-  amount_paid: number;
-  payment_date: string;
-  remaining_balance: number;
+  data: {
+    payment_id: number;
+    student_id: string;
+    student_name: string;
+    student_class: string;
+    student_faculty: string;
+    amount_paid: number;
+    payment_date: string;
+    remaining_balance: number;
+  };
 }
 
 export interface PaymentHistoryItem {
-  user_id: string;
+  payment_id: number;
   student_id: string;
   student_name: string;
-  amount_paid: number;
+  student_class: string;
+  student_faculty: string;
+  semester: string;
+  year: number;
+  amount: number;
   payment_date: string;
+  user_id: string;
+  username: string;
+  user_full_name: string;
 }
 
 export interface PaymentHistoryResponse {

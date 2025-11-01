@@ -5,7 +5,7 @@ import { SearchStudentPage } from './features/tuition/pages/SearchStudentPage';
 import { OTPVerifyPage } from './features/tuition/pages/OTPVerifyPage';
 import { PaymentSuccessPage } from './features/tuition/pages/PaymentSuccessPage';
 import { PaymentHistoryPage } from './features/payment-history/PaymentHistoryPage'; // ✅ Add
-import { isAuthenticated } from './features/authentication/services/authService';
+import { isAuthenticated } from './services/authService';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;

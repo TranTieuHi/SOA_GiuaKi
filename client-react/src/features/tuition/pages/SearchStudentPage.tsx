@@ -7,7 +7,7 @@ import { StudentSearchForm } from '../components/StudentSearchForm';
 import { StudentInfoCard } from '../components/StudentInfoCard';
 import { PaymentConfirmCard } from '../components/PaymentConfirmCard';
 import { searchStudent } from '../../../services/tuitionService';
-import { getCurrentUser } from '../../authentication/services/authService';
+import { getCurrentUser } from '../../../services/authService';
 import { Student } from '../../../types/tuition';
 
 export function SearchStudentPage() {

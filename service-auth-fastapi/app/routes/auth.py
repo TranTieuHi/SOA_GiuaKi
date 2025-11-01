@@ -1,27 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.controllers.auth import login_user, register_user
+from app.controllers.auth import login_user, register_user, get_user_profile
 from app.models.user import LoginRequest, RegisterRequest
+from app.middleware.auth_middleware import get_current_user
 
 router = APIRouter()
 
-@router.post("/login")  # ✅ /api/auth/login
-def login(credentials: LoginRequest):  # <--- XÓA ASYNC
-    """
-    Login user and return JWT token
-    """
+@router.post("/login")
+async def login(credentials: LoginRequest):
+    """User login"""
     return login_user(credentials)
-  
-@router.post("/register")  # ✅ /api/auth/register
-def register(user_data: RegisterRequest):
-    """
-    Register new user
-    
-    POST /api/auth/register
-    {
-      "username": "johndoe",
-      "email": "john@example.com",
-      "password": "password123",
-      "full_name": "John Doe"
-    }
-    """
+
+@router.post("/register")
+async def register(user_data: RegisterRequest):
+    """User registration"""
     return register_user(user_data)
+
+@router.get("/profile")
+async def profile(current_user: dict = Depends(get_current_user)):
+    """Get current user profile - PROTECTED ROUTE"""
+    return get_user_profile(current_user["user_id"])

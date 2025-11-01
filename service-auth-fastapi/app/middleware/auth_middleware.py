@@ -142,6 +142,45 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
                 "error": "INTERNAL_ERROR"
             }
         )
+        
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """
+    Extract and verify JWT token to get current user
+    """
+    try:
+        token = credentials.credentials
+        
+        # Decode JWT token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        user_id = payload.get("user_id")
+        username = payload.get("username")
+        email = payload.get("email")
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication credentials"
+            )
+        
+        return {
+            "user_id": user_id,
+            "username": username,
+            "email": email
+        }
+        
+    except JWTError as e:
+        print(f"❌ JWT Error: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Could not validate credentials"
+        )
+    except Exception as e:
+        print(f"❌ Auth error: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication credentials"
+        )
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
     """
