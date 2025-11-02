@@ -113,6 +113,37 @@ export const refreshUserData = async (): Promise<User> => {
   }
 };
 
+// ✅ Add force refresh function
+export const forceRefreshUserData = async (): Promise<User> => {
+  try {
+    console.log('\n' + '='.repeat(60));
+    console.log('🔄 FORCE REFRESHING USER DATA (GUARANTEED FRESH)');
+    console.log('='.repeat(60));
+    
+    // ✅ Use force refresh endpoint
+    const response = await authApi.post('/auth/profile/refresh');
+    
+    console.log('✅ Force refresh response:', response.data);
+    console.log('📊 Fresh balance:', response.data.user?.available_balance);
+    
+    const userData = response.data.user;
+    
+    // Update localStorage with guaranteed fresh data
+    localStorage.setItem('user', JSON.stringify(userData));
+    
+    console.log('📱 User data updated with guaranteed fresh data');
+    console.log('   💰 New balance:', userData.available_balance.toLocaleString('vi-VN'));
+    console.log('   🔄 Data freshness:', response.data.metadata?.data_freshness);
+    console.log('='.repeat(60) + '\n');
+    
+    return userData;
+  } catch (error) {
+    console.error('❌ Force refresh user data error:', error);
+    // Fallback to regular refresh
+    return await refreshUserData();
+  }
+};
+
 // ✅ GET CURRENT USER FROM LOCALSTORAGE
 export const getCurrentUser = (): User | null => {
   try {

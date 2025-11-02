@@ -1,6 +1,6 @@
 from passlib.context import CryptContext
 from fastapi import HTTPException
-from app.config.database import get_db_connection, db
+from app.config.database import get_db_connection, db, refresh_connections
 from app.utils.jwt_helper import create_access_token
 import pymysql
 import uuid
@@ -318,6 +318,129 @@ def register_user(user_data: RegisterRequest):
             cursor.close()
         if connection:
             db.return_connection(connection)
+
+def get_user_profile(user_id: str):
+    """Get user profile by user_id with fresh database connection"""
+    connection = None
+    cursor = None
+    
+    try:
+        print(f"\n{'='*60}")
+        print(f"👤 GETTING USER PROFILE FROM AUTH SERVICE")
+        print(f"{'='*60}")
+        print(f"   User ID: {user_id}")
+        print(f"   Timestamp: {datetime.now().isoformat()}")
+        
+        # ✅ Force refresh connections before critical read
+        refresh_connections()
+        
+        # ✅ Get fresh connection
+        connection = get_db_connection()
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+        
+        # ✅ Verify database and connection info
+        cursor.execute("SELECT DATABASE() as current_db, CONNECTION_ID() as conn_id, NOW() as server_time")
+        db_info = cursor.fetchone()
+        print(f"   🗄️ Database: {db_info['current_db']}")
+        print(f"   🔗 Connection ID: {db_info['conn_id']}")
+        print(f"   ⏰ Server time: {db_info['server_time']}")
+        
+        # ✅ Force fresh read with explicit transaction
+        cursor.execute("START TRANSACTION")
+        
+        query = """
+            SELECT user_id, username, email_address, full_name, 
+                   phone_number, available_balance, created_at, updated_at
+            FROM users 
+            WHERE user_id = %s
+            FOR UPDATE  
+        """
+        print(f"   📝 Query: {query.replace('FOR UPDATE', 'FOR UPDATE (fresh read)')}")
+        
+        cursor.execute(query, (user_id,))
+        user = cursor.fetchone()
+        
+        # ✅ Commit to release lock
+        cursor.execute("COMMIT")
+        
+        if not user:
+            print(f"   ❌ User not found in database")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "statusCode": 404,
+                    "message": "User not found",
+                    "error": "USER_NOT_FOUND"
+                }
+            )
+        
+        print(f"   ✅ Fresh user data retrieved:")
+        print(f"      Username: {user['username']}")
+        print(f"      Full name: {user['full_name']}")
+        print(f"      💰 Balance: {user['available_balance']:,.0f} VND")
+        print(f"      🕐 Updated at: {user['updated_at']}")
+        print(f"      🔄 Data freshness: GUARANTEED FRESH")
+        print(f"{'='*60}\n")
+        
+        return {
+            "success": True,
+            "statusCode": 200,
+            "message": "User profile retrieved with fresh data",
+            "user": {
+                "user_id": user['user_id'],
+                "username": user['username'],
+                "email_address": user['email_address'],
+                "full_name": user['full_name'],
+                "phone_number": user['phone_number'],
+                "available_balance": float(user['available_balance']),
+                "created_at": user['created_at'].isoformat() if user['created_at'] else None,
+                "updated_at": user['updated_at'].isoformat() if user['updated_at'] else None
+            },
+            # ✅ Add metadata for debugging
+            "metadata": {
+                "connection_id": db_info['conn_id'],
+                "server_time": db_info['server_time'].isoformat(),
+                "data_freshness": "guaranteed_fresh"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Get profile error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "statusCode": 500,
+                "message": "Failed to get user profile",
+                "error": str(e)
+            }
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            db.return_connection(connection)
+
+# ✅ Add endpoint to force refresh
+def force_refresh_user_data(user_id: str):
+    """Force refresh user data by clearing all caches"""
+    try:
+        print(f"🔄 FORCE REFRESHING USER DATA for {user_id}")
+        
+        # Clear connection pool
+        refresh_connections()
+        
+        # Get fresh data
+        return get_user_profile(user_id)
+        
+    except Exception as e:
+        print(f"❌ Force refresh error: {e}")
+        raise e
 
 def get_user_profile(user_id: str):
     """Get user profile by user_id"""

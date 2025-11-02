@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 # ✅ Register routes
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(auth.router, prefix="/api", tags=["Authentication"])
 app.include_router(user.router, prefix="/api", tags=["Users"])
 
 @app.get("/")

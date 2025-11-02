@@ -85,11 +85,11 @@ export function LoginForm() {
 
             {/* Username */}
             <div className="space-y-2">
-              <Label htmlFor="username">Tên đăng nhập (Email)</Label>
+              <Label htmlFor="username">Tên đăng nhập </Label>
               <Input
                 id="username"
                 type="text"
-                placeholder="hau6042004@gmail.com"
+                placeholder="Tên đăng nhập"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 disabled={isLoading}
